@@ -1,0 +1,14 @@
+/artifacts/
+*.bag
+*.db3
+*.db3-*
+*.mcap
+*.log
+.env
+.env.*
+*.pem
+*.key
+.aws/
+.agents/
+.codex/
+__pycache__/
