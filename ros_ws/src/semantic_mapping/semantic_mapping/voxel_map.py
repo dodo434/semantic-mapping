@@ -101,6 +101,15 @@ class VoxelMap:
             elif voxel.floor >= 2:
                 yield key, FLOOR
 
+    def class_probabilities(self, key, now):
+        """Normalize the current floor, solid and movable evidence for a voxel."""
+        voxel = self.voxels[key]
+        movable = voxel.movable if now < voxel.dynamic_until else 0
+        total = voxel.floor + voxel.solid + movable
+        if not total:
+            return (0.0, 0.0, 0.0)
+        return voxel.floor/total, voxel.solid/total, movable/total
+
     def project(self, center, floor_z, now, max_height=1.8):
         """Return OccupancyGrid costs and integer origin. Unknown stays unknown."""
         half = int(np.ceil(self.radius / self.resolution))

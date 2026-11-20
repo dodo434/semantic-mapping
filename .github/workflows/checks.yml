@@ -47,6 +47,7 @@ jobs:
           colcon build --event-handlers console_direct+
           source install/setup.bash
           export ROS_LOCALHOST_ONLY=1
+          python3 ../tools/fusion-smoke.py
           ros2 launch semantic_mapping nav.launch.py autostart:=true > /tmp/semantic-nav.log 2>&1 &
           nav_pid=$!
           trap 'kill "$nav_pid" 2>/dev/null || true' EXIT

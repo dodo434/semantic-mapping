@@ -89,6 +89,7 @@ local_costmap:
       robot_radius: 0.24
       update_frequency: 10.0
       publish_frequency: 5.0
+      always_send_full_costmap: true
       track_unknown_space: true
       plugins: ["semantic", "inflation"]
       semantic:

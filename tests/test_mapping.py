@@ -43,6 +43,7 @@ class MappingTests(unittest.TestCase):
         mapping.integrate(wall, np.array([MOVABLE]), origin, base, 10.1)
         key = mapping.key(wall[0])
         self.assertEqual(dict(mapping.classified(10.2))[key], MOVABLE)
+        np.testing.assert_allclose(mapping.class_probabilities(key, 10.2), [0., 0.4, 0.6])
         self.assertEqual(dict(mapping.classified(12.0))[key], STATIC)
 
     def test_ray_clears_moved_endpoint_and_grid_keeps_unknown(self):

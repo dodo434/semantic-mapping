@@ -49,7 +49,7 @@ index 863c98e..7f99265 100644
      void SetLocalMapper(LocalMapping* pLocalMapper);
      void SetLoopClosing(LoopClosing* pLoopClosing);
 diff --git a/src/ORBextractor.cc b/src/ORBextractor.cc
-index 970b7cc..2c88e14 100644
+index 970b7cc..4f251a2 100644
 --- a/src/ORBextractor.cc
 +++ b/src/ORBextractor.cc
 @@ -58,6 +58,7 @@
@@ -68,7 +68,7 @@ index 970b7cc..2c88e14 100644
 +                cv::Mat levelMask, expandedMask;
 +                cv::resize(dynamicMask_, levelMask, mvImagePyramid[level].size(), 0, 0,
 +                           cv::INTER_NEAREST);
-+                const int radius = 15;
++                const int radius = EDGE_THRESHOLD;
 +                const auto kernel = cv::getStructuringElement(
 +                    cv::MORPH_RECT, cv::Size(2 * radius + 1, 2 * radius + 1));
 +                cv::dilate(levelMask, expandedMask, kernel);

@@ -25,7 +25,9 @@ def score(matrix):
         union = matrix[index, :].sum() + matrix[:, index].sum() - tp
         iou[name] = float(tp / union) if union else None
     defined = [value for value in iou.values() if value is not None]
+    movable = matrix[3, :].sum()
     return {'mIoU': sum(defined)/len(defined) if defined else None,
+            'movable_recall': float(matrix[3, 3]/movable) if movable else None,
             'class_IoU': iou, 'confusion': matrix.tolist()}
 
 

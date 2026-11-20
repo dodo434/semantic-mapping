@@ -34,6 +34,7 @@ class Fusion(Node):
         super().__init__('semantic_fusion')
         self.world = self.declare_parameter('world_frame', 'map').value
         self.base = self.declare_parameter('base_frame', 'base_link').value
+        self.right_optical_frame = self.declare_parameter('right_optical_frame', 'camera_infra2_optical_frame').value
         self.base_height = self.declare_parameter('base_height', 0.18).value
         self.max_obstacle_height = self.declare_parameter('max_obstacle_height', 1.8).value
         self.step = self.declare_parameter('pixel_stride', 8).value
@@ -166,9 +167,12 @@ class Fusion(Node):
             ir_k = camera_model(info, rectified=True)
             if min(ir_k[:2]) <= 0:
                 continue
+            frame = info.header.frame_id
+            if name == 'right' and 'left' in self.info and frame == self.info['left'].header.frame_id:
+                frame = self.right_optical_frame
             try:
                 tf = self.tf.lookup_transform(
-                    info.header.frame_id, depth_msg.header.frame_id, Time.from_msg(depth_msg.header.stamp))
+                    frame, depth_msg.header.frame_id, Time.from_msg(depth_msg.header.stamp))
             except TransformException:
                 continue
             projected = project_exclusions(transform_points(points, tf.transform), ir_k,
@@ -176,7 +180,7 @@ class Fusion(Node):
             projected = cv2.dilate(projected, np.ones((9, 9), dtype=np.uint8))
             message = self.bridge.cv2_to_imgmsg(projected, encoding='mono8')
             message.header.stamp = depth_msg.header.stamp
-            message.header.frame_id = info.header.frame_id
+            message.header.frame_id = frame
             publisher.publish(message)
 
     def publish_static_depth(self, native, moving, message, info):
@@ -260,9 +264,13 @@ class Fusion(Node):
         ] + [
             PointField(name='rgba', offset=12, datatype=PointField.UINT32, count=1),
             PointField(name='class_id', offset=16, datatype=PointField.UINT32, count=1),
+            PointField(name='class_confidence', offset=20, datatype=PointField.FLOAT32, count=1),
         ]
         colors = {FLOOR: 0xFF31BB55, STATIC: 0xFF6FA6DA, MOVABLE: 0xFFFF8425}
         scale = self.map.resolution
-        rows = [(*((coordinate+0.5)*scale for coordinate in key), colors[label], label)
-                for key, label in self.map.classified(now)]
+        rows = [
+            (*((coordinate+0.5)*scale for coordinate in key),
+             colors[label], label, self.map.class_probabilities(key, now)[label-1])
+            for key, label in self.map.classified(now)
+        ]
         self.cloud.publish(point_cloud2.create_cloud(header, fields, rows))
