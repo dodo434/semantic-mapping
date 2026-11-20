@@ -1,4 +1,4 @@
-name: Stage 1 checks
+name: Bring-up and calibration checks
 
 on:
   push:
@@ -8,12 +8,15 @@ permissions:
   contents: read
 
 jobs:
-  stage-1:
+  checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: shellcheck stage-01/*.sh
-      - run: python3 -m unittest discover -s tests -v
+      - run: shellcheck stage-0[12]/*.sh
+      - run: |
+          python3 -m venv "$RUNNER_TEMP/calibration-tests"
+          "$RUNNER_TEMP/calibration-tests/bin/python" -m pip install PyYAML==6.0.3
+          "$RUNNER_TEMP/calibration-tests/bin/python" -m unittest discover -s tests -v
