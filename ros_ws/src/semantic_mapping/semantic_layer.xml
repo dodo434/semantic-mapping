@@ -1,0 +1,6 @@
+<library path="semantic_layer">
+  <class name="semantic_mapping/SemanticLayer"
+         type="semantic_mapping::SemanticLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>Projects the semantic occupancy grid into the current Nav2 window.</description>
+  </class>
+</library>

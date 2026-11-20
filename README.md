@@ -12,12 +12,17 @@ From the project root, run these checks with Bash and Python 3.10 or newer.
 The shell tests use a fake ROS CLI and the bag tests use SQLite fixtures.
 
 ```bash
-python3 -m pip install PyYAML==6.0.3  # Use an activated virtual environment.
+python3 -m pip install PyYAML==6.0.3 numpy==1.26.4  # Use an activated virtual environment.
 for script in stage-0[12]/*.sh; do bash -n "$script" || break; done
 python3 -m unittest discover -s tests -v
-shellcheck stage-0[12]/*.sh
+shellcheck stage-0[12]/*.sh tools/*.sh
 ```
 
 ShellCheck is also run by GitHub Actions. Verify live camera and IMU timing,
 wheel odometry, installed package security updates, and cooling on the robot
 using the Stage 1 runbook.
+
+[Stages 3–10](DEPLOYMENT.md) build and deploy stereo-inertial SLAM, segmentation,
+semantic occupancy, nvblox or OctoMap geometry, and Nav2. They include an
+evaluation protocol and troubleshooting guide. The real robot still needs
+its measured calibration, TF, motor interface, and acceptance runs.

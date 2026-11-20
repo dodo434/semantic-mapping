@@ -13,3 +13,10 @@
 .codex/
 __pycache__/
 /.venv-calibration/
+/.venv-vision/
+/ros_ws/build/
+/ros_ws/install/
+/ros_ws/log/
+*.engine
+*.onnx
+*.pt

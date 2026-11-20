@@ -1,0 +1,133 @@
+diff --git a/include/ORBextractor.h b/include/ORBextractor.h
+index bb7aace..4334a75 100644
+--- a/include/ORBextractor.h
++++ b/include/ORBextractor.h
+@@ -80,10 +80,13 @@ public:
+         return mvInvLevelSigma2;
+     }
+ 
++    void SetDynamicMask(const cv::Mat& mask) { dynamicMask_ = mask; }
++
+     std::vector<cv::Mat> mvImagePyramid;
+ 
+ protected:
+ 
++    cv::Mat dynamicMask_;
+     void ComputePyramid(cv::Mat image);
+     void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);    
+     std::vector<cv::KeyPoint> DistributeOctTree(const std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
+diff --git a/include/System.h b/include/System.h
+index 872c86e..e3a81a8 100644
+--- a/include/System.h
++++ b/include/System.h
+@@ -121,6 +121,11 @@ public:
+     Sophus::SE3f TrackMonocular(const cv::Mat &im, const double &timestamp, const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
+ 
+ 
++    // Masks use the original image pixels. Nonzero pixels exclude features.
++    void SetDynamicStereoMasks(const cv::Mat& left, const cv::Mat& right);
++    bool GetTrackedBodyPose(Sophus::SE3f& body_to_world, unsigned long& map_id);
++    bool GetLatestBodyKeyframe(Sophus::SE3f& body_to_world, unsigned long& id, double& stamp);
++
+     // This stops local mapping thread (map building) and performs only camera tracking.
+     void ActivateLocalizationMode();
+     // This resumes local mapping thread and performs SLAM again.
+diff --git a/include/Tracking.h b/include/Tracking.h
+index 863c98e..7f99265 100644
+--- a/include/Tracking.h
++++ b/include/Tracking.h
+@@ -74,6 +74,11 @@ public:
+     Sophus::SE3f GrabImageMonocular(const cv::Mat &im, const double &timestamp, string filename);
+ 
+     void GrabImuData(const IMU::Point &imuMeasurement);
++    void SetDynamicStereoMasks(const cv::Mat& left, const cv::Mat& right)
++    {
++        mpORBextractorLeft->SetDynamicMask(left);
++        mpORBextractorRight->SetDynamicMask(right);
++    }
+ 
+     void SetLocalMapper(LocalMapping* pLocalMapper);
+     void SetLoopClosing(LoopClosing* pLoopClosing);
+diff --git a/src/ORBextractor.cc b/src/ORBextractor.cc
+index 970b7cc..2c88e14 100644
+--- a/src/ORBextractor.cc
++++ b/src/ORBextractor.cc
+@@ -58,6 +58,7 @@
+ #include <opencv2/imgproc/imgproc.hpp>
+ #include <vector>
+ #include <iostream>
++#include <algorithm>
+ 
+ #include "ORBextractor.h"
+ 
+@@ -874,6 +875,22 @@ namespace ORB_SLAM3
+             vector<KeyPoint> & keypoints = allKeypoints[level];
+             keypoints.reserve(nfeatures);
+ 
++            if (!dynamicMask_.empty()) {
++                cv::Mat levelMask, expandedMask;
++                cv::resize(dynamicMask_, levelMask, mvImagePyramid[level].size(), 0, 0,
++                           cv::INTER_NEAREST);
++                const int radius = 15;
++                const auto kernel = cv::getStructuringElement(
++                    cv::MORPH_RECT, cv::Size(2 * radius + 1, 2 * radius + 1));
++                cv::dilate(levelMask, expandedMask, kernel);
++                vToDistributeKeys.erase(
++                    std::remove_if(vToDistributeKeys.begin(), vToDistributeKeys.end(),
++                        [&](const cv::KeyPoint& point) {
++                            return expandedMask.at<unsigned char>(
++                                cvRound(point.pt.y) + minBorderY,
++                                cvRound(point.pt.x) + minBorderX) != 0;
++                        }), vToDistributeKeys.end());
++            }
+             keypoints = DistributeOctTree(vToDistributeKeys, minBorderX, maxBorderX,
+                                           minBorderY, maxBorderY,mnFeaturesPerLevel[level], level);
+ 
+diff --git a/src/System.cc b/src/System.cc
+index 60d9c51..b86421c 100644
+--- a/src/System.cc
++++ b/src/System.cc
+@@ -475,6 +475,43 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp,
+ 
+ 
+ 
++void System::SetDynamicStereoMasks(const cv::Mat& left, const cv::Mat& right)
++{
++    cv::Mat preparedLeft = left, preparedRight = right;
++    if (settings_ && settings_->needToRectify() && !left.empty() && !right.empty()) {
++        preparedLeft.release();
++        preparedRight.release();
++        cv::remap(left, preparedLeft, settings_->M1l(), settings_->M2l(),
++                  cv::INTER_NEAREST, cv::BORDER_CONSTANT, cv::Scalar(255));
++        cv::remap(right, preparedRight, settings_->M1r(), settings_->M2r(),
++                  cv::INTER_NEAREST, cv::BORDER_CONSTANT, cv::Scalar(255));
++    } else if (settings_ && settings_->needToResize() && !left.empty() && !right.empty()) {
++        cv::resize(left, preparedLeft, settings_->newImSize(), 0, 0, cv::INTER_NEAREST);
++        cv::resize(right, preparedRight, settings_->newImSize(), 0, 0, cv::INTER_NEAREST);
++    }
++    mpTracker->SetDynamicStereoMasks(preparedLeft, preparedRight);
++}
++
++bool System::GetTrackedBodyPose(Sophus::SE3f& body_to_world, unsigned long& map_id)
++{
++    if (GetTrackingState() != Tracking::OK || !mpAtlas->isImuInitialized())
++        return false;
++    body_to_world = mpTracker->mCurrentFrame.GetImuPose();
++    map_id = mpAtlas->GetCurrentMap()->GetId();
++    return true;
++}
++
++bool System::GetLatestBodyKeyframe(Sophus::SE3f& body_to_world, unsigned long& id, double& stamp)
++{
++    auto* keyframe = mpTracker->GetLastKeyFrame();
++    if (!keyframe || keyframe->isBad())
++        return false;
++    body_to_world = keyframe->GetImuPose();
++    id = keyframe->mnId;
++    stamp = keyframe->mTimeStamp;
++    return true;
++}
++
+ void System::ActivateLocalizationMode()
+ {
+     unique_lock<mutex> lock(mMutexMode);

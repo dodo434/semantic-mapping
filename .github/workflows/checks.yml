@@ -1,4 +1,4 @@
-name: Bring-up and calibration checks
+name: Semantic mapping checks
 
 on:
   push:
@@ -8,15 +8,57 @@ permissions:
   contents: read
 
 jobs:
-  checks:
+  portable:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: shellcheck stage-0[12]/*.sh
+      - run: shellcheck stage-0[12]/*.sh tools/*.sh
       - run: |
-          python3 -m venv "$RUNNER_TEMP/calibration-tests"
-          "$RUNNER_TEMP/calibration-tests/bin/python" -m pip install PyYAML==6.0.3
-          "$RUNNER_TEMP/calibration-tests/bin/python" -m unittest discover -s tests -v
+          python3 -m venv "$RUNNER_TEMP/semantic-tests"
+          "$RUNNER_TEMP/semantic-tests/bin/python" -m pip install PyYAML==6.0.3 numpy==1.26.4
+          "$RUNNER_TEMP/semantic-tests/bin/python" -m compileall -q ros_ws/src/semantic_mapping tools
+          "$RUNNER_TEMP/semantic-tests/bin/python" -m unittest discover -s tests -v
+
+  humble:
+    runs-on: ubuntu-24.04
+    container: ros:humble-ros-base-jammy
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ROS and build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake git libboost-serialization-dev libeigen3-dev libepoxy-dev \
+            libgl1-mesa-dev libglew-dev libssl-dev libx11-dev libopencv-dev python3-numpy python3-colcon-common-extensions \
+            ros-humble-navigation2 ros-humble-cv-bridge ros-humble-sensor-msgs-py
+      - name: Compile the Humble package and exercise Nav2
+        run: |
+          source /opt/ros/humble/setup.bash
+          cd ros_ws
+          colcon build --event-handlers console_direct+
+          source install/setup.bash
+          export ROS_LOCALHOST_ONLY=1
+          ros2 launch semantic_mapping nav.launch.py autostart:=true > /tmp/semantic-nav.log 2>&1 &
+          nav_pid=$!
+          trap 'kill "$nav_pid" 2>/dev/null || true' EXIT
+          python3 ../tools/ros-smoke.py || { cat /tmp/semantic-nav.log; exit 1; }
+      - name: Compile patched ORB-SLAM3 and the stereo-inertial node
+        run: |
+          source /opt/ros/humble/setup.bash
+          JOBS=2 bash tools/build-orb.sh "$RUNNER_TEMP/orb-deps"
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/orb-deps/install/lib:${LD_LIBRARY_PATH:-}"
+          cd ros_ws
+          colcon build --event-handlers console_direct+ --cmake-args \
+            "-DORB_SLAM3_ROOT=$RUNNER_TEMP/orb-deps/ORB_SLAM3" \
+            "-DCMAKE_PREFIX_PATH=$RUNNER_TEMP/orb-deps/install"
+          source install/setup.bash
+          ros2 pkg executables semantic_mapping | grep -Fx 'semantic_mapping stereo_inertial'

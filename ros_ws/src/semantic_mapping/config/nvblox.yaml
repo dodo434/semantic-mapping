@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    voxel_size: 0.05
+    num_cameras: 1
+    global_frame: map
+    use_tf_transforms: true
+    use_color: false
+    use_depth: true
+    use_lidar: false
+    mapping_type: static_tsdf
+    esdf_mode: "2d"
+    input_qos: SENSOR_DATA
+    integrate_depth_rate_hz: 10.0
+    update_esdf_rate_hz: 8.0
+    update_mesh_rate_hz: 5.0
+    publish_layer_rate_hz: 5.0
+    maximum_input_queue_length: 12
+    map_clearing_radius_m: 6.0
+    map_clearing_frame_id: base_link
+    clear_map_outside_radius_rate_hz: 1.0
+    publish_esdf_distance_slice: true
+    static_mapper:
+      projective_integrator_max_integration_distance_m: 5.0
