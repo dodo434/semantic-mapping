@@ -1,5 +1,7 @@
 """Latest-frame instance segmentation with original acquisition timestamps."""
 
+import os
+from pathlib import Path
 import threading
 import time
 
@@ -23,12 +25,15 @@ DEFAULT_MOVABLE = [
 class Segmentation(Node):
     def __init__(self):
         super().__init__('segmentation')
+        os.environ.setdefault('YOLO_OFFLINE', 'true')
+        os.environ.setdefault('YOLO_AUTOINSTALL', 'false')
         from ultralytics import YOLO
 
-        model = self.declare_parameter('model', '').value
-        if not model:
-            raise ValueError('Set model to the local YOLOv8 segmentation weights or engine')
-        self.model = YOLO(model, task='segment')
+        checkpoint = self.declare_parameter('model', '').value
+        model = Path(checkpoint)
+        if not model.is_file() or model.suffix not in ('.pt', '.engine', '.onnx'):
+            raise ValueError('Set model to a local .pt, .engine or .onnx file')
+        self.model = YOLO(str(model), task='segment')
         self.device = self.declare_parameter('device', '0').value
         self.size = self.declare_parameter('image_size', 416).value
         self.rate = self.declare_parameter('max_hz', 15.0).value

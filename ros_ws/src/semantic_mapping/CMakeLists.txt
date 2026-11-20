@@ -37,6 +37,14 @@ if(ORB_SLAM3_ROOT)
   ament_target_dependencies(stereo_inertial
     cv_bridge geometry_msgs rclcpp sensor_msgs std_msgs tf2 tf2_ros)
   install(TARGETS stereo_inertial DESTINATION lib/${PROJECT_NAME})
+
+  include(CTest)
+  if(BUILD_TESTING)
+    add_executable(test_orb_mask test/orb_mask.cpp)
+    target_include_directories(test_orb_mask PRIVATE "${ORB_SLAM3_ROOT}/include" ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(test_orb_mask "${ORB_SLAM3_LIBRARY}" ${OpenCV_LIBS})
+    add_test(NAME orb_mask_excludes_features COMMAND test_orb_mask)
+  endif()
 endif()
 
 ament_python_install_package(${PROJECT_NAME})

@@ -22,6 +22,8 @@ class VelocityGate(Node):
         self.max_linear = self.declare_parameter('max_linear', 0.25).value
         self.max_angular = self.declare_parameter('max_angular', 0.7).value
         self.enabled = self.declare_parameter('enabled', False).value
+        if not (0 < self.max_linear <= 1.0 and 0 < self.max_angular <= 2.0):
+            raise ValueError('Velocity limits must be positive and within the bench bounds')
         self.arm_until = self.pose_until = self.grid_until = self.command_until = 0.0
         self.command = Twist()
         self.tracking = False

@@ -46,6 +46,7 @@ filename from Stage 2's measured settings. Run a textured loop with masks
 disabled to establish the baseline.
 
 ```bash
+umask 077
 mkdir -p artifacts/runs
 ros2 launch semantic_mapping slam.launch.py \
   vocabulary:="$PWD/artifacts/deps/ORB_SLAM3/Vocabulary/ORBvoc.txt" \
@@ -77,11 +78,13 @@ guide. Verify Torch, TensorRT, and NumPy imports before export.
 ```bash
 python3 -m venv --system-site-packages .venv-vision
 source .venv-vision/bin/activate
-python -m pip install 'numpy<2' ultralytics==8.3.253
+python -m pip install numpy==1.26.4 opencv-python==4.11.0.86 ultralytics==8.3.253 onnx==1.17.0
 python -c 'import torch, torchvision, tensorrt, numpy, cv_bridge; print(torch.__version__, torch.cuda.is_available(), tensorrt.__version__, numpy.__version__)'
 mkdir -p artifacts/models
 curl -fL -o artifacts/models/yolov8n-seg.pt \
   https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n-seg.pt
+printf '%s  %s\n' a7cd8f929e1903d78a12a48efecab430209f18dc46cb96c3599a5980c63c423c \
+  artifacts/models/yolov8n-seg.pt | sha256sum -c -
 python tools/export-model.py artifacts/models/yolov8n-seg.pt --image-size 416
 
 ros2 launch semantic_mapping perception.launch.py \
@@ -97,7 +100,7 @@ preserved, then pass `--int8-data /path/to/representative-seg.yaml`. Benchmark
 INT8 against FP16 on the same labeled scenes and retain FP16 if movable
 recall or edge agreement regresses. The export omits embedded NMS.
 On the Pi, export with `--format onnx --image-size 320` and install ONNX
-Runtime, then use `model:=...onnx device:=cpu image_size:=320 max_hz:=3.0`.
+Runtime (the CPU smoke test used `onnxruntime==1.20.1`), then use `model:=...onnx device:=cpu image_size:=320 max_hz:=3.0`.
 The Pi still needs the CPU PyTorch and TorchVision runtime required by
 Ultralytics for prediction and postprocessing.
 
@@ -144,7 +147,19 @@ that `map -> base_link` works throughout movement before attempting Nav2.
 
 On Jetson, start perception with `publish_filtered_depth:=true`. Install
 `nvblox_ros` through the supported Isaac ROS 3.2 Humble environment. Source
-that environment and this workspace overlay in the shell where you will run:
+that environment and this workspace overlay in the shell where you will run.
+After [adding the Isaac Apt repository](https://nvidia-isaac-ros.github.io/v/release-3.2/getting_started/dev_env_setup.html),
+install the release 3.2 package. The ROS nodes must share a domain. With
+local-only discovery, run the container on the host network.
+
+```bash
+sudo apt update
+apt-cache policy ros-humble-isaac-ros-nvblox
+sudo apt install ros-humble-isaac-ros-nvblox
+```
+
+Check that the candidate is from the Isaac ROS 3.2 repository, then start the
+backend:
 
 ```bash
 ros2 launch semantic_mapping nvblox.launch.py
@@ -172,6 +187,21 @@ its optical sensor frame for the ray origin. Restart OctoMap after a map
 revision. Start with `map_hz:=3.0 pixel_stride:=12` on the Pi.
 [NVIDIA Isaac ROS nvblox 3.2](https://nvidia-isaac-ros.github.io/v/release-3.2/repositories_and_packages/isaac_ros_nvblox/index.html)
 
+Once the individual nodes pass their checks, start them together from the
+project root. The camera and wheel driver are launched separately.
+
+```bash
+ros2 launch semantic_mapping pipeline.launch.py \
+  vocabulary:="$PWD/artifacts/deps/ORB_SLAM3/Vocabulary/ORBvoc.txt" \
+  settings:="$PWD/artifacts/calibration/d435i-stereo-inertial.yaml" \
+  model:="$PWD/artifacts/models/yolov8n-seg.engine" \
+  geometry:=nvblox base_height:=0.18 with_nav2:=true
+```
+
+Replace the example base height with the measured value. By default the
+combined launch uses only semantic occupancy and leaves Nav2 disabled.
+When Nav2 is included, its velocity gate stays disabled.
+
 ## 7. Confirm class behavior and clearing
 
 Measure how high `base_link` sits above the floor, and pass that measurement
@@ -179,7 +209,7 @@ in metres as `base_height:=...` to perception. RANSAC fits an upward plane
 near this height in the gravity-aligned frame. Points near the fitted plane
 are floor. Other valid depth defaults to static structure, including
 vertical surfaces. Movable instance evidence takes precedence. The 3D map
-tracks bounded per-voxel class evidence and clears transient obstacles by
+normalizes bounded per-voxel evidence into class probabilities and clears transient obstacles by
 free-space rays and a 1.2 s observation timeout. The 2D projection labels
 floor as 0, movable as 99, static as 100, and unseen cells as −1.
 
@@ -189,6 +219,10 @@ occlusion, and verify that old messages cannot refresh the costmap. Recording
 `/semantic/class_mask` enables the dense evaluation mask with pixel IDs
 0 unknown, 1 floor, 2 static, and 3 movable. Leave that subscription off
 during rate measurements because generating the dense mask adds work.
+To capture predictions for annotation, run
+`python tools/save-class-masks.py artifacts/runs/predicted-png --frames 100`
+with the camera or bag playback running. Name reference masks using the
+same acquisition timestamps and class IDs.
 
 ## 8. Configure and test Nav2
 
@@ -232,9 +266,10 @@ camera profile and repeat the affected calibration.
 ```bash
 sudo nvpmodel -q --verbose
 sudo jetson_clocks --show
-tegrastats --interval 1000 --logfile artifacts/runs/tegrastats.log
+tegrastats --interval 1000 --logfile artifacts/runs/tegrastats.log &
+stats_pid=$!
 python tools/measure-topics.py --seconds 60 > artifacts/runs/rates.json
-tegrastats --stop
+kill -INT "$stats_pid"
 ```
 
 Use an inline meter at the board and camera supply to evaluate the
@@ -283,3 +318,23 @@ python tools/score-labels.py path/to/annotated-png path/to/predicted-png
 The hardware acceptance requires measured results. CI builds the software
 and uses synthetic inputs. TensorRT, nvblox, thermal behavior, drift,
 clearance, and actual motor stop times are measured on the robot.
+
+### Optional depth-odometry comparison
+
+To diagnose repeated tracking loss on texture-poor sections, run a separate
+RGB-D odometry estimate and compare it against the wheel and stereo-inertial
+trajectories. Use the depth estimate as an input to a separately tuned local
+state estimator only after replay validation.
+
+```bash
+sudo apt install ros-humble-rtabmap-odom
+ros2 run rtabmap_odom rgbd_odometry --ros-args \
+  -p frame_id:=base_link -p odom_frame_id:=depth_odom -p publish_tf:=false \
+  -p approx_sync:=true -p qos:=2 -p qos_camera_info:=2 \
+  -r rgb/image:=/camera/camera/color/image_raw \
+  -r depth/image:=/camera/camera/aligned_depth_to_color/image_raw \
+  -r rgb/camera_info:=/camera/camera/color/camera_info \
+  -r odom:=/semantic/depth_odom
+```
+
+[RTAB-Map ROS 2 odometry source](https://github.com/introlab/rtabmap_ros/tree/ros2/rtabmap_odom)

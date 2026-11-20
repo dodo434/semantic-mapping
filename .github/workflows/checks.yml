@@ -47,6 +47,7 @@ jobs:
           colcon build --event-handlers console_direct+
           source install/setup.bash
           export ROS_LOCALHOST_ONLY=1
+          ros2 launch semantic_mapping pipeline.launch.py --show-args
           python3 ../tools/fusion-smoke.py
           ros2 launch semantic_mapping nav.launch.py autostart:=true > /tmp/semantic-nav.log 2>&1 &
           nav_pid=$!
@@ -56,10 +57,28 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           JOBS=2 bash tools/build-orb.sh "$RUNNER_TEMP/orb-deps"
-          export LD_LIBRARY_PATH="$RUNNER_TEMP/orb-deps/install/lib:${LD_LIBRARY_PATH:-}"
+          deps="$RUNNER_TEMP/orb-deps"
+          export LD_LIBRARY_PATH="$deps/install/lib:$deps/install/lib/x86_64-linux-gnu:$deps/ORB_SLAM3/lib:$deps/ORB_SLAM3/Thirdparty/DBoW2/lib:$deps/ORB_SLAM3/Thirdparty/g2o/lib:${LD_LIBRARY_PATH:-}"
           cd ros_ws
           colcon build --event-handlers console_direct+ --cmake-args \
             "-DORB_SLAM3_ROOT=$RUNNER_TEMP/orb-deps/ORB_SLAM3" \
             "-DCMAKE_PREFIX_PATH=$RUNNER_TEMP/orb-deps/install"
           source install/setup.bash
           ros2 pkg executables semantic_mapping | grep -Fx 'semantic_mapping stereo_inertial'
+          ctest --test-dir build/semantic_mapping --output-on-failure
+          PYTHONPATH=".." python3 - <<'PY'
+          from pathlib import Path
+          import runpy
+          fixture = runpy.run_path('../tests/test_stage_02.py')
+          cameras, imu = fixture['fixture']()
+          Path('/tmp/semantic-orb-smoke.yaml').write_text(
+              fixture['CALIBRATION']['build_settings'](cameras, imu, 30))
+          PY
+          export ROS_LOCALHOST_ONLY=1
+          ros2 launch semantic_mapping slam.launch.py \
+            vocabulary:="$deps/ORB_SLAM3/Vocabulary/ORBvoc.txt" \
+            settings:=/tmp/semantic-orb-smoke.yaml > /tmp/semantic-slam.log 2>&1 &
+          slam_pid=$!
+          trap 'kill "$slam_pid" 2>/dev/null || true' EXIT
+          timeout 30s bash -c 'until ros2 topic list | grep -Fxq /semantic/body_pose; do sleep 1; done' ||
+            { cat /tmp/semantic-slam.log; exit 1; }
