@@ -255,16 +255,17 @@ private:
     state.data = slam_->GetTrackingState();
     state_->publish(state);
     unsigned long map_id = 0;
+    int map_revision = 0;
     Sophus::SE3f body;
-    if (!slam_->GetTrackedBodyPose(body, map_id)) {
+    if (!slam_->GetTrackedBodyPose(body, map_id, map_revision)) {
       return;
     }
     auto header = left->header;
     header.frame_id = world_;
-    const bool changed = slam_->MapChanged();
-    if (!have_map_ || active_map_ != map_id || changed) {
+    if (!have_map_ || active_map_ != map_id || last_revision_ != map_revision) {
       revision_->publish(header);
       active_map_ = map_id;
+      last_revision_ = map_revision;
       have_map_ = true;
     }
     publish_pose(header, body, imu_frame);
@@ -346,6 +347,7 @@ private:
   int64_t mask_wait_, mask_slop_, stereo_slop_, shift_ns_;
   int64_t epoch_ = 0, previous_image_ = std::numeric_limits<int64_t>::min();
   int64_t submitted_imu_ = std::numeric_limits<int64_t>::min();
+  int last_revision_ = 0;
   unsigned long active_map_ = 0, latest_keyframe_ = std::numeric_limits<unsigned long>::max();
   Images left_, right_, left_masks_, right_masks_;
   ImuQueue imu_;

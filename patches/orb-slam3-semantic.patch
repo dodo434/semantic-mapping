@@ -47,7 +47,7 @@ index bb7aace..4334a75 100644
      void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);    
      std::vector<cv::KeyPoint> DistributeOctTree(const std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
 diff --git a/include/System.h b/include/System.h
-index 872c86e..e3a81a8 100644
+index 872c86e..eab9ca8 100644
 --- a/include/System.h
 +++ b/include/System.h
 @@ -121,6 +121,11 @@ public:
@@ -56,7 +56,7 @@ index 872c86e..e3a81a8 100644
  
 +    // Masks use the original image pixels. Nonzero pixels exclude features.
 +    void SetDynamicStereoMasks(const cv::Mat& left, const cv::Mat& right);
-+    bool GetTrackedBodyPose(Sophus::SE3f& body_to_world, unsigned long& map_id);
++    bool GetTrackedBodyPose(Sophus::SE3f& body_to_world, unsigned long& map_id, int& revision);
 +    bool GetLatestBodyKeyframe(Sophus::SE3f& body_to_world, unsigned long& id, double& stamp);
 +
      // This stops local mapping thread (map building) and performs only camera tracking.
@@ -114,10 +114,10 @@ index 970b7cc..4f251a2 100644
                                            minBorderY, maxBorderY,mnFeaturesPerLevel[level], level);
  
 diff --git a/src/System.cc b/src/System.cc
-index 60d9c51..b86421c 100644
+index 60d9c51..aa3a37b 100644
 --- a/src/System.cc
 +++ b/src/System.cc
-@@ -475,6 +475,43 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp,
+@@ -475,6 +475,45 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp,
  
  
  
@@ -138,12 +138,14 @@ index 60d9c51..b86421c 100644
 +    mpTracker->SetDynamicStereoMasks(preparedLeft, preparedRight);
 +}
 +
-+bool System::GetTrackedBodyPose(Sophus::SE3f& body_to_world, unsigned long& map_id)
++bool System::GetTrackedBodyPose(Sophus::SE3f& body_to_world, unsigned long& map_id, int& revision)
 +{
 +    if (GetTrackingState() != Tracking::OK || !mpAtlas->isImuInitialized())
 +        return false;
 +    body_to_world = mpTracker->mCurrentFrame.GetImuPose();
-+    map_id = mpAtlas->GetCurrentMap()->GetId();
++    auto* map = mpAtlas->GetCurrentMap();
++    map_id = map->GetId();
++    revision = map->GetLastBigChangeIdx();
 +    return true;
 +}
 +
